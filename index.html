@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Image Editor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .editor-container {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .tools {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .tool-group {
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+        }
+        input[type="file"], button {
+            margin: 5px 0;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h1>Advanced Image Editor</h1>
+    <input type="file" id="imageInput" accept="image/*">
+    <div class="editor-container">
+        <canvas id="canvas"></canvas>
+        <div class="tools">
+            <div class="tool-group">
+                <h3>Adjustments</h3>
+                <label>Brightness: <input type="range" id="brightness" min="-100" max="100" value="0"></label>
+                <label>Contrast: <input type="range" id="contrast" min="-100" max="100" value="0"></label>
+                <label>Saturation: <input type="range" id="saturation" min="-100" max="100" value="0"></label>
+            </div>
+            <div class="tool-group">
+                <h3>Transform</h3>
+                <button id="rotateLeft">Rotate Left</button>
+                <button id="rotateRight">Rotate Right</button>
+                <button id="flipHorizontal">Flip Horizontal</button>
+                <button id="flipVertical">Flip Vertical</button>
+            </div>
+            <div class="tool-group">
+                <h3>Crop</h3>
+                <button id="cropBtn">Crop</button>
+                <button id="resetCrop">Reset Crop</button>
+            </div>
+            <div class="tool-group">
+                <h3>Draw</h3>
+                <input type="color" id="colorPicker" value="#000000">
+                <input type="range" id="brushSize" min="1" max="50" value="5">
+                <button id="drawBtn">Draw</button>
+                <button id="eraserBtn">Eraser</button>
+            </div>
+            <button id="resetBtn">Reset All</button>
+            <button id="downloadBtn">Download Image</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        let image = new Image();
+        let isDrawing = false;
+        let isCropping = false;
+        let cropStartX, cropStartY, cropEndX, cropEndY;
+
+        // Load image
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                image.onload = function() {
+                    canvas.width = image.width;
+                    canvas.height = image.height;
+                    ctx.drawImage(image, 0, 0);
+                }
+                image.src = event.target.result;
+            }
+            reader.readAsDataURL(file);
+        });
+
+        // Adjustments
+        ['brightness', 'contrast', 'saturation'].forEach(adjustment => {
+            document.getElementById(adjustment).addEventListener('input', applyFilters);
+        });
+
+        function applyFilters() {
+            ctx.filter = `brightness(${100 + parseInt(document.getElementById('brightness').value)}%) 
+                          contrast(${100 + parseInt(document.getElementById('contrast').value)}%) 
+                          saturate(${100 + parseInt(document.getElementById('saturation').value)}%)`;
+            ctx.drawImage(image, 0, 0);
+        }
+
+        // Transform
+        document.getElementById('rotateLeft').addEventListener('click', () => rotateImage(-90));
+        document.getElementById('rotateRight').addEventListener('click', () => rotateImage(90));
+        document.getElementById('flipHorizontal').addEventListener('click', () => flipImage('horizontal'));
+        document.getElementById('flipVertical').addEventListener('click', () => flipImage('vertical'));
+
+        function rotateImage(degrees) {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = canvas.height;
+            tempCanvas.height = canvas.width;
+            tempCtx.translate(tempCanvas.width / 2, tempCanvas.height / 2);
+            tempCtx.rotate(degrees * Math.PI / 180);
+            tempCtx.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.width = tempCanvas.width;
+            canvas.height = tempCanvas.height;
+            ctx.drawImage(tempCanvas, 0, 0);
+        }
+
+        function flipImage(direction) {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            if (direction === 'horizontal') {
+                tempCtx.scale(-1, 1);
+                tempCtx.drawImage(canvas, -canvas.width, 0);
+            } else {
+                tempCtx.scale(1, -1);
+                tempCtx.drawImage(canvas, 0, -canvas.height);
+            }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(tempCanvas, 0, 0);
+        }
+
+        // Crop
+        document.getElementById('cropBtn').addEventListener('click', () => {
+            isCropping = !isCropping;
+            canvas.style.cursor = isCropping ? 'crosshair' : 'default';
+        });
+
+        canvas.addEventListener('mousedown', startCrop);
+        canvas.addEventListener('mousemove', drawCrop);
+        canvas.addEventListener('mouseup', endCrop);
+
+        function startCrop(e) {
+            if (!isCropping) return;
+            cropStartX = e.offsetX;
+            cropStartY = e.offsetY;
+        }
+
+        function drawCrop(e) {
+            if (!isCropping || !cropStartX) return;
+            const rect = canvas.getBoundingClientRect();
+            cropEndX = e.clientX - rect.left;
+            cropEndY = e.clientY - rect.top;
+            redrawCanvas();
+            ctx.strokeStyle = 'red';
+            ctx.strokeRect(cropStartX, cropStartY, cropEndX - cropStartX, cropEndY - cropStartY);
+        }
+
+        function endCrop() {
+            if (!isCropping || !cropStartX) return;
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = Math.abs(cropEndX - cropStartX);
+            tempCanvas.height = Math.abs(cropEndY - cropStartY);
+            tempCtx.drawImage(canvas, 
+                Math.min(cropStartX, cropEndX), Math.min(cropStartY, cropEndY), 
+                tempCanvas.width, tempCanvas.height, 
+                0, 0, tempCanvas.width, tempCanvas.height
+            );
+            canvas.width = tempCanvas.width;
+            canvas.height = tempCanvas.height;
+            ctx.drawImage(tempCanvas, 0, 0);
+            cropStartX = cropStartY = cropEndX = cropEndY = null;
+            isCropping = false;
+            canvas.style.cursor = 'default';
+        }
+
+        document.getElementById('resetCrop').addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.width = image.width;
+            canvas.height = image.height;
+            ctx.drawImage(image, 0, 0);
+        });
+
+        // Draw
+        let isErasing = false;
+        document.getElementById('drawBtn').addEventListener('click', () => {
+            isDrawing = true;
+            isErasing = false;
+            canvas.style.cursor = 'crosshair';
+        });
+        document.getElementById('eraserBtn').addEventListener('click', () => {
+            isDrawing = true;
+            isErasing = true;
+            canvas.style.cursor = 'crosshair';
+        });
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+
+        function startDrawing(e) {
+            if (!isDrawing) return;
+            ctx.beginPath();
+            ctx.moveTo(e.offsetX, e.offsetY);
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            ctx.lineTo(e.offsetX, e.offsetY);
+            ctx.strokeStyle = isErasing ? '#FFFFFF' : document.getElementById('colorPicker').value;
+            ctx.lineWidth = document.getElementById('brushSize').value;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+        }
+
+        // Reset
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.width = image.width;
+            canvas.height = image.height;
+            ctx.drawImage(image, 0, 0);
+            document.getElementById('brightness').value = 0;
+            document.getElementById('contrast').value = 0;
+            document.getElementById('saturation').value = 0;
+        });
+
+        // Download
+        document.getElementById('downloadBtn').addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'edited_image.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        });
+
+        function redrawCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(image, 0, 0);
+            applyFilters();
+        }
+    </script>
+</body>
+</html>
